@@ -1,0 +1,69 @@
+# input Makefile
+# DO NOT EDIT!
+# Run ./configure to produce the Makefile instead.
+
+FASTICA	=
+
+BINDIR	=
+INCDIR	=
+INCHEAL =
+LIBDIR	=
+FITSDIR	= 
+LIBFITS	= 
+LIBHEAL = 
+
+ADDUS   = 
+
+FC	= 
+FTYPE   =
+FFLAGS	= 
+CC	= 
+CFLAGS	= 
+LDFLAGS	=
+AR      = 
+PPFLAGS =
+
+MOD	=
+
+OS	=
+
+RM	= rm -f
+MKFLAGS	= FC=$(FC) FFLAGS="$(FFLAGS)" LDFLAGS="$(LDFLAGS)" \
+	CC=$(CC) CFLAGS="$(CFLAGS)" MOD=$(MOD) OS=$(OS) FASTICA=$(FASTICA) \
+	LIBDIR=$(LIBDIR) INCDIR=$(INCDIR) BINDIR=$(BINDIR) LIBHEAL=$(LIBHEAL) \
+	ADDUS=$(ADDUS) AR="$(AR)" FTYPE=$(FTYPE) \
+	PPFLAGS="$(PPFLAGS)"
+
+prog	= fastica
+
+all: modules 
+	@for p in $(prog); do \
+	cd src/$$p; \
+	$(MAKE) $(MKFLAGS); \
+	cd ../../..; \
+	done
+
+ifeq ($(FTYPE),ifcold)
+modules:
+	@rm -f $(INCDIR)/list.pcl; \
+	echo work.pc >> $(INCDIR)/list.pcl; \
+	cd src/mod; \
+	$(MAKE) $(MKFLAGS)
+else
+modules:
+	@cd src/mod; $(MAKE) $(MKFLAGS)
+endif
+
+clean:
+	for p in $(prog) lib mod; do \
+	$(RM) src/$$p/*.o src/$$p/*.$(MOD) src/$$p/lib*.a src/$$p/*.pc src/$$p/*.pcl ; \
+	done
+
+tidy: clean
+	for p in $(prog); do \
+	$(RM) $(BINDIR)/$$p; \
+	done
+	$(RM) $(INCDIR)/*.$(MOD)
+	$(RM) $(INCDIR)/*.pc $(INCDIR)/*.pcl
+	$(RM) $(LIBDIR)/*.a
+	$(RM) Makefile.bak Makefile test/test*

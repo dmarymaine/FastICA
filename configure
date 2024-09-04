@@ -1,0 +1,429 @@
+#!/bin/sh
+
+# -----------------------------------------------------------------
+# FastICA 1.0 configuration script adapted from
+#
+# HEALPix 1.2 configuration script
+# Matthias Bartelmann, Feb. 29, 2000
+# edited by E. Hivon, Nov 2001 (addition of IdentifyCompiler)
+# edited by E. Hivon, April 2002 (addition of sun_modules)
+# addition of askFFT and countUnderScore July 2002, EH
+# choice of parallel/serial code Nov 2002, EH
+# deal with all versions of ifc (addition of ifc_modules)
+# extension to Darwin (Mac OS) Jan 2003, EH
+# -----------------------------------------------------------------
+# auxiliary functions:
+#   findFITS: search for FITSIO library
+#   findFFTW: search for FFTW library
+#   fullPath: convert relative to absolute directory names
+#   checkDir: search for installation directories and create them
+#             is necessary
+#   setDefaults: set default values of variables
+#   sun_modules : test weither the Sun compiler creates modules ending with .M or .mod
+#   ifc_modules : test weither the IFC compiler creates .d or .mod (version7) modules
+#   GuessCompiler: tries to guess compiler from operating system
+#   askFFT: ask user for his choice of fft, find fftw library
+#   askOpenMP: ask user for compilation of OpenMP source files
+#   countUnderScore: match trailing underscores with fftw
+#   IdentifyCompiler : identify Non native f90 compiler
+#   askUserF90:  ask user the f90 compiler command
+#   askUserMisc:  ask user to confirm or change various defaults
+#   editMakefile: create makefile from template
+#   makeProfile: create profile
+#   installProfile: modify user's shell profile if agreed
+# -----------------------------------------------------------------
+
+echoLn () {
+    if [ "`uname -s`" = "Linux" -o "`uname -s`" = "Darwin" ]; then
+	echo -n "$*"
+    else
+	echo "$*\c"
+    fi
+}
+
+findFITS () {
+    for dir in /usr/lib /usr/local/lib $1; do
+	[ -r "${dir}/lib${LIBFITS}.a" ] && FITSDIR=$dir
+    done
+}
+
+findFFTW () {
+    for dir in /usr/lib /usr/local/lib $1; do
+	[ -r "${dir}/lib${LIBFFTW}.a" ] && FFTWDIR=$dir
+    done
+}
+
+findHealpix () {
+    for dir in /usr/lib /usr/local/lib $1; do
+	[ -r $"{dir}/lib${LIBHEALPIX}.a" ] && HEALDIR=$dir
+    done
+}
+# -----------------------------------------------------------------
+
+fullPath () {
+    t='TEMP=`cd $TEMP; pwd`'
+    for d in $*; do
+	eval `echo $t | sed 's/TEMP/'$d'/g'`
+    done
+}
+
+# -----------------------------------------------------------------
+
+checkDir () {
+    l=""
+    for d in $*; do
+	[ ! -d $d ] && l="$l $d"
+    done
+    if [ "x$l" != "x" ]; then
+	echo "Warning: The following directories could not be found:"
+	for d in $l; do
+	    echo "$d"
+	done
+	echoLn "Should I attempt to create these directories (Y|n)? "
+	read answer
+	if [ "x$answer" != "xn" ]; then
+	    for d in $l; do
+		mkdir $d 1>/dev/null 2>&1
+		if [ $? -gt 0 ]; then
+		    echo "Error: Could not create directory $d"
+		    exit 1
+		fi
+	    done
+	else
+	    echo "Create installation directories first."
+	    exit 1
+	fi
+    fi
+}    
+
+# -----------------------------------------------------------------
+
+setDefaults () {
+    FC="f90"
+    CC="cc"
+    FFLAGS="-I\$(FASTICA)/include -I\$(INCHEAL)"
+    CFLAGS="-O"
+    LDFLAGS="-L\$(FASTICA)/lib -lfstica -L\$(LIBHEAL) -L\$(FITSDIR) -lhealpix -lgif -l\$(LIBFITS)"
+    LIBFITS="cfitsio"
+    FITSDIR="/usr/local/lib"
+    BINDIR="./bin"
+    INCDIR="./include"
+    LIBDIR="./lib"
+    FASTICA=`pwd`
+    LIBHEAL="\${HEALDIR}/lib"
+    INCHEAL="\${HEALDIR}/include"
+    MOD="mod"
+    OS=`uname -s`
+    ADDUS="-DADDOUS "
+    FPP="-D"
+    PARALL=""
+    PRFLAGS=""
+    AR="ar rv"
+    FTYPE=""
+    PPFLAGS=""
+
+    echo "you seem to be running $OS"
+
+    case $OS in
+	AIX)
+	    FC="xlf90";;
+	Linux)
+	    FC="";;
+	Darwin)
+	    FC="";;
+    esac
+
+    FCNAME="$OS Native compiler"
+}
+
+# -----------------------------------------------------------------
+
+sun_modules () {
+cat > to_be_removed.f90 << EOF
+   module to_be_removed
+       integer :: i
+   end module to_be_removed
+EOF
+   $FC -c to_be_removed.f90 -o to_be_removed.o
+
+   if test -s to_be_removed.M  ; then
+       MOD="M"
+   else
+       MOD="mod"
+   fi
+
+   /bin/rm -f to_be_removed.*
+}
+
+# -----------------------------------------------------------------
+ifc_modules () {
+cat > to_be_removed.f90 << EOF
+   module to_be_removed
+       integer :: i
+   end module to_be_removed
+EOF
+   $FC -c to_be_removed.f90 -o to_be_removed.o
+
+   if test -s to_be_removed.d  ; then
+    # version 5 and 6 of ifc
+       IFCMOD="d"
+       IFCINC="-cl,\$(FASTICA)/include/list.pcl"
+       IFCVERSION="ifcold"
+   else
+       IFCMOD="mod"
+       IFCINC="-I\$(FASTICA)/include -I\$(INCHEAL)"
+       IFCVERSION="ifnew"
+   fi
+
+   /bin/rm -f to_be_removed.* 
+   /bin/rm -f TO_BE_REMOVED.*
+}
+
+# -----------------------------------------------------------------
+
+GuessCompiler () {
+    case $OS in
+	AIX)
+	    FC="xlf90"
+	    FFLAGS="$FFLAGS -qsuffix=f=f90:cpp=F90"
+	    OFLAGS="-O"
+	    CFLAGS="$CFLAGS $FPP""RS6000"
+	    FPP="-WF,-D"
+	    PRFLAGS="-qsmp=omp";;
+	SunOS)
+	    sun_modules
+	    FFLAGS=`echo $FFLAGS | sed "s/-I/-M/g"`
+	    LDFLAGS="$LDFLAGS -lm -lnsl -lsocket"
+	    OFLAGS="-fast";;
+	IRIX*)
+	    OS="IRIX"
+	    LDFLAGS="$LDFLAGS -lm"
+	    OFLAGS="-O"
+	    PRFLAGS="-mp";;
+	Linux)
+  	    OFLAGS="-O3"
+	    IdentifyCompiler;;
+	Darwin)
+  	    OFLAGS="-O"
+	    AR="libtool -static -o" 
+	    IdentifyCompiler;;
+	OSF*)
+	    OS="OSF"
+	    OFLAGS="-O5 -fast"
+	    PRFLAGS="-omp";;
+	*)
+	    echo "\"$OS\" is not supported yet"
+	    exit 1;;
+    esac
+}
+
+# -----------------------------------------------------------------
+
+countUnderScore () {
+cat > to_be_removed.f90 << EOF
+    subroutine sub1()
+      return
+    end subroutine sub1
+EOF
+ case $OS in
+  AIX)
+    mv to_be_removed.f90 to_be_removed.f
+    $FC -c to_be_removed.f -o to_be_removed.o ;;
+  *)
+    $FC -c to_be_removed.f90 -o to_be_removed.o ;;
+ esac
+
+    stwo=`nm to_be_removed.o | grep sub1__ | wc -l`
+    sone=`nm to_be_removed.o | grep sub1_  | wc -l`
+    ltwo=`nm $lib | grep fftw_f77_one__ | wc -l`
+    lone=`nm $lib | grep fftw_f77_one_  | wc -l`
+
+    if [ $ltwo != 0 ] ; then
+      if [ $stwo != 0 ] ; then
+        ADDUS="$FPP""ADD0US"
+      elif [ $sone != 0 ] ; then
+        ADDUS="$FPP""ADD1US"
+      else
+        ADDUS="$FPP""ADD2US"
+      fi
+    elif [ $lone != 0 ] ; then
+      if [ $stwo != 0 ] ; then
+        echo "uncompatible trailing underscores"
+        exit 1
+      elif [ $sone != 0 ] ; then
+        ADDUS="$FPP""ADD0US"
+      else
+        ADDUS="$FPP""ADD1US"
+      fi
+    else
+      if [ $stwo != 0 ] ; then
+        echo "uncompatible trailing underscores"
+	exit 1
+      elif [ $sone != 0 ] ; then
+        echo "uncompatible trailing underscores"
+	exit 1
+      else
+        ADDUS="$FPP""ADD0US"
+      fi
+    fi
+
+#      echo $ADDUS
+   /bin/rm -f to_be_removed.*
+
+
+}
+# -----------------------------------------------------------------
+
+IdentifyCompiler () {
+# Lahey and Fujitsu still have to be tested
+        nima=`$FC -V 2>&1 | grep -i imagine1 | wc -l`
+        nnag=`$FC -V 2>&1 | grep -i nagware  | wc -l`
+        nifc=`$FC -V 2>&1 | grep -i intel    | wc -l`
+        npgf=`$FC -V 2>&1 | grep -i portland | wc -l`
+	nlah=`$FC --version 2>&1 | grep -i lahey | wc -l`
+	nfuj=`$FC -V 2>&1 | grep -i fujitsu | wc -l`
+	ng95=`$FC -dumpversion 2>&1 | grep 'g95' | wc -l`
+	ngfortran=`$FC --version 2>&1 | grep 'GNU Fortran' | wc -l`
+	nvas=`$FC | grep -i sierra | wc -l`
+ 
+        if [ $nima != 0 ] ; then
+                FCNAME="Imagine F compiler"
+                FFLAGS="$FFLAGS -DNAG -w -dusty -mismatch_all"
+		echo "$FCNAME is not supported yet"
+		exit 1
+        elif [ $nnag != 0 ] ; then
+                FCNAME="NAGWare compiler"
+		PPFLAGS="-fpp"
+# very sloppy compiler flags: no longer needed
+#                FFLAGS="$FFLAGS -DNAG -w -dusty -mismatch_all"
+# compiler flags for very thorough checking. use for debugging
+#                FFLAGS="$FFLAGS -DNAG -strict95 -g -gline -C=all -u"
+# standard flags
+                FFLAGS="$FFLAGS -DNAG -strict95"
+        elif [ $nifc != 0 ] ; then 
+		ifc_modules
+                FCNAME="Intel Fortran Compiler"
+                FFLAGS="$IFCINC -Vaxlib -cm -w -vec_report0"
+		MOD="$IFCMOD"
+		FTYPE="$IFCVERSION"
+#  		OFLAGS="-O3 -tpp7 -xW" # pentium 4
+  		OFLAGS="-O3"
+#		OFLAGS="-O3 -axiMKW" # generates optimized code for each Pentium platform
+		PRFLAGS="-openmp" # Open MP enabled, to be tested
+        elif [ $npgf != 0 ] ; then
+                FCNAME="Portland Group Compiler"
+        elif [ $nlah != 0 ] ; then
+                FCNAME="Lahey/Fujitsu Compiler"
+#  		FFLAGS="$FFLAGS --nap --nchk --npca --ntrace --tpp --trap dio"
+		FFLAGS="$FFLAGS --nap --nchk --npca --ntrace --tpp --trap" # (on trial version)
+        elif [ $nfuj != 0 ] ; then
+                FCNAME="Fujitsu Compiler"
+  		FFLAGS="$FFLAGS -Am -X9 -static"
+        elif [ $nvas != 0 ] ; then
+                FCNAME="Pacific/Sierra Compiler"
+		echo "$FCNAME is not supported"
+	elif [ $ng95 != 0 ] ; then
+		FCNAME="g95 compiler"
+		FFLAGS="$FFLAGS"
+		OFLAGS="-O3"
+		CC="gcc"
+	elif [ $ngfortran != 0 ] ; then
+		FCNAME="gfortran compiler"
+		FFLAGS="$FFLAGS -fopenmp -fPIC"
+		OFLAGS="-O3"
+		CC="gcc"
+        else
+                echo "$FC: Unknown compiler"
+                exit 1
+        fi
+}
+
+# -----------------------------------------------------------------
+
+askUserF90 () {
+    echoLn "enter name of your F90 compiler ($FC): "
+    read answer
+    [ "x$answer" != "x" ] && FC="$answer"
+}
+
+# -----------------------------------------------------------------
+
+askUserMisc () {
+    echo "  Note: your Fortran compiler is $FCNAME"
+    echoLn "enter compilation flags for $FC compiler ($FFLAGS): "
+    read answer
+    [ "x$answer" != "x" ] && FFLAGS="$answer"
+
+    echoLn "enter optimisation flags for $FC compiler ($OFLAGS): "
+    read answer
+    [ "x$answer" != "x" ] && OFLAGS="$answer"
+    FFLAGS="$OFLAGS $FFLAGS"
+    echo "  Fortran code will be compiled with $FC $FFLAGS"
+
+    echoLn "enter name of your C compiler ($CC): "
+    read answer
+    [ "x$answer" != "x" ] && CC="$answer"
+
+    checkDir bin lib include
+    fullPath BINDIR INCDIR LIBDIR
+
+    echoLn "enter full name of cfitsio library (lib${LIBFITS}.a): "
+    read answer
+    [ "x$answer" != "x" ] && LIBFITS=`basename $answer ".a" | sed "s/^lib//"`
+
+    findFITS $LIBDIR
+    echoLn "enter location of cfitsio library ($FITSDIR): "
+    read answer
+    [ "x$answer" != "x" ] && FITSDIR=$answer
+
+    findHealpix $HEALDIR
+    echoLn "enter Healpix root directory ($HEALDIR): "
+    read answer
+    [ "x$answer" != "x" ] && HEALDIR=$answer
+
+    LIBHEAL="${HEALDIR}/lib/"
+    INCHEAL="${HEALDIR}/include/"
+    lib="${FITSDIR}/lib${LIBFITS}.a"
+    if [ ! -r $lib ]; then
+	echo "error: fits library $lib not found"
+	exit -1
+    fi
+}
+
+# --------------------------------------------------------------
+editMakefile () {
+    [ -r Makefile ] && mv Makefile Makefile.bak
+    cat Makefile.in |\
+	sed "s|^FC.*$|FC	= $FC|" |\
+	sed "s|^FFLAGS.*$|FFLAGS	= $FFLAGS|" |\
+	sed "s|^LDFLAGS.*$|LDFLAGS	= $LDFLAGS|" |\
+	sed "s|^CC.*$|CC	= $CC|" |\
+	sed "s|^CFLAGS.*$|CFLAGS	= $CFLAGS|" |\
+	sed "s|^FASTICA.*$|FASTICA	= $FASTICA|" |\
+	sed "s|^FITSDIR.*$|FITSDIR	= $FITSDIR|" |\
+	sed "s|^LIBFITS.*$|LIBFITS	= $LIBFITS|" |\
+	sed "s|^BINDIR.*$|BINDIR	= $BINDIR|" |\
+	sed "s|^INCDIR.*$|INCDIR	= $INCDIR|" |\
+	sed "s|^INCHEAL.*$|INCHEAL = $INCHEAL|" |\
+	sed "s|^LIBDIR.*$|LIBDIR	= $LIBDIR|" |\
+	sed "s|^LIBHEAL.*$|LIBHEAL	= $LIBHEAL|" |\
+	sed "s|^AR.*$|AR        = $AR|" |\
+	sed "s|^ADDUS.*$|ADDUS	= $ADDUS|" |\
+	sed "s|^MOD.*$|MOD	= $MOD|" |\
+	sed "s|^FTYPE.*$|FTYPE	= $FTYPE|" |\
+	sed "s|^PPFLAGS.*$|PPFLAGS	= $PPFLAGS|" |\
+	sed "s|^OS.*$|OS	= $OS|" > Makefile
+}
+
+# -----------------------------------------------------------------
+
+setDefaults
+askUserF90
+GuessCompiler
+askUserMisc
+editMakefile
+
+echo "Configuration finished."
+echo "Now run \"(GNU)make\" to build the package."
+
+exit 0

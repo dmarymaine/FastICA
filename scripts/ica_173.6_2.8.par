@@ -1,0 +1,23 @@
+# ***************************************************
+# specific parameters for FastICA
+# file for regions outside the custom cut
+# ***************************************************
+1
+4
+1000
+1.d-10
+1.d0
+1.d0
+p
+./
+f
+f
+../../../../WMAP7/1deg/1deg_N512_map_K1_imap_yr7_v4.fits
+../../../Templates/1deg_h512_lambda_408MHz.fits
+../../../Templates/1deg_h512_FINK_Halpha_fd05.fits
+../../../Templates/1deg_h512_FDS8_94GHz.fits
+0
+f
+5
+../../../../WMAP7/1deg/mask_N512_173.6_2.8_ring.fits
+
